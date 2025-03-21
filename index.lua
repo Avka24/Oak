@@ -1,163 +1,142 @@
 --[[
-    Auto Farming Wood Script (Simplified)
+    Anti-Detection Auto Farming Wood Script
     Compatible with Xeno PC executor
     Features:
     - Finds nearest trees
     - Cuts wood
     - Processes logs
     - Sells to NPC
-    - Basic anti-detection
+    - Anti-detection measures
 ]]
-
--- Variables
-local player = game.Players.LocalPlayer
-local character = player.Character or player.CharacterAdded:Wait()
-local humanoid = character:WaitForChild("HumanoidRootPart")
-local farming = false
-local selling = false
 
 -- Configuration
 local config = {
-    treeTypes = {"Pine", "Oak", "Birch", "Walnut", "Elm", "Palm", "Koa", "Snow", "Fir"}, -- Add all tree types
-    sellNPCName = "Cashier", -- Common NPC name for selling
-    processorName = "Sawmill",
-    autoDelay = 1.5
+    sellNPCName = "WoodRUs", -- Change this to the actual NPC name
+    sellPadName = "Sell",    -- Change this to the actual sell pad name
+    treeTypes = {"Pine", "Oak", "Birch", "Walnut"}, -- Adjust tree types based on game
+    cutDistance = 10,        -- Distance to cut wood
+    processorName = "Sawmill", -- Name of the processor
+    autoSellDelay = 10,      -- Time between selling runs
+    
+    -- Anti-detection settings
+    humanizeMovement = true,    -- Add random delays and movement patterns
+    randomizeActions = true,    -- Randomize action timing
+    useWalkInstead = true,      -- Use walking instead of teleporting when possible
+    minDelay = 0.2,             -- Minimum delay between actions
+    maxDelay = 0.8,             -- Maximum delay between actions
+    walkSpeed = 20,             -- Walking speed (default humanoid is 16)
+    avoidInstantTeleport = true, -- Avoid instant teleportation across long distances
+    simulateHumanClicks = true   -- Make tool activation more human-like
 }
 
--- Create simple UI
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Parent = game.CoreGui
-ScreenGui.Name = "LumberHelper"
-ScreenGui.ResetOnSpawn = false
+-- UI Library (Using a less detectable UI library)
+local library = loadstring(game:HttpGet("https://raw.githubusercontent.com/xHeptc/Kavo-UI-Library/main/source.lua"))()
+local window = library.CreateLib("Lumber Helper", "Ocean") -- Changed name to be less suspicious
 
-local MainFrame = Instance.new("Frame")
-MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0, 250, 0, 300)
-MainFrame.Position = UDim2.new(0.8, 0, 0.3, 0)
-MainFrame.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-MainFrame.BorderSizePixel = 0
-MainFrame.Active = true
-MainFrame.Draggable = true
-MainFrame.Parent = ScreenGui
+-- Main Tab
+local mainTab = window:NewTab("Helper")
+local farmingSection = mainTab:NewSection("Assistance Options")
+local statusSection = mainTab:NewSection("Status")
 
-local Title = Instance.new("TextLabel")
-Title.Name = "Title"
-Title.Size = UDim2.new(1, 0, 0, 30)
-Title.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-Title.TextColor3 = Color3.fromRGB(255, 255, 255)
-Title.Text = "Wood Helper"
-Title.TextSize = 18
-Title.Font = Enum.Font.SourceSansBold
-Title.Parent = MainFrame
+-- Settings Tab
+local settingsTab = window:NewTab("Settings")
+local settingsSection = settingsTab:NewSection("Configuration")
+local antiDetectionSection = settingsTab:NewSection("Safety Settings")
 
-local StatusLabel = Instance.new("TextLabel")
-StatusLabel.Name = "Status"
-StatusLabel.Size = UDim2.new(1, -20, 0, 30)
-StatusLabel.Position = UDim2.new(0, 10, 0, 40)
-StatusLabel.BackgroundTransparency = 1
-StatusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-StatusLabel.Text = "Status: Ready"
-StatusLabel.TextSize = 14
-StatusLabel.Font = Enum.Font.SourceSans
-StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
-StatusLabel.Parent = MainFrame
-
-local StatsLabel = Instance.new("TextLabel")
-StatsLabel.Name = "Stats"
-StatsLabel.Size = UDim2.new(1, -20, 0, 70)
-StatsLabel.Position = UDim2.new(0, 10, 0, 70)
-StatsLabel.BackgroundTransparency = 1
-StatsLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-StatsLabel.Text = "Trees Cut: 0\nLogs Processed: 0\nWood Sold: 0"
-StatsLabel.TextSize = 14
-StatsLabel.Font = Enum.Font.SourceSans
-StatsLabel.TextXAlignment = Enum.TextXAlignment.Left
-StatsLabel.Parent = MainFrame
-
--- Create buttons
-local function CreateButton(name, position, callback)
-    local Button = Instance.new("TextButton")
-    Button.Name = name
-    Button.Size = UDim2.new(0, 110, 0, 30)
-    Button.Position = position
-    Button.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-    Button.TextColor3 = Color3.fromRGB(255, 255, 255)
-    Button.Text = name
-    Button.TextSize = 14
-    Button.Font = Enum.Font.SourceSans
-    Button.Parent = MainFrame
-    Button.MouseButton1Click:Connect(callback)
-    return Button
-end
-
-local FarmButton = CreateButton("Start Farm", UDim2.new(0, 10, 0, 150), function()
-    farming = not farming
-    FarmButton.Text = farming and "Stop Farm" or "Start Farm"
-    if farming then
-        StatusLabel.Text = "Status: Starting..."
-        startFarming()
-    else
-        StatusLabel.Text = "Status: Stopped"
-    end
-end)
-
-local SellButton = CreateButton("Auto Sell: OFF", UDim2.new(0, 130, 0, 150), function()
-    selling = not selling
-    SellButton.Text = "Auto Sell: " .. (selling and "ON" or "OFF")
-end)
-
-local SellNowButton = CreateButton("Sell Now", UDim2.new(0, 10, 0, 190), function()
-    sellWood()
-end)
-
-local ResetButton = CreateButton("Reset Stats", UDim2.new(0, 130, 0, 190), function()
-    stats = {treesCut = 0, logsProcessed = 0, woodSold = 0}
-    updateStats()
-end)
-
--- Stats tracking
+-- Variables
+local farming = false
+local selling = false
+local processing = false
 local stats = {
     treesCut = 0,
     logsProcessed = 0,
-    woodSold = 0
+    woodSold = 0,
+    moneyEarned = 0
 }
 
-function updateStats()
-    StatsLabel.Text = string.format(
-        "Trees Cut: %d\nLogs Processed: %d\nWood Sold: %d",
-        stats.treesCut, stats.logsProcessed, stats.woodSold
-    )
+-- Get player and character references
+local player = game.Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+local rootPart = character:WaitForChild("HumanoidRootPart")
+
+-- Anti-detection functions
+local function randomDelay()
+    local delay = math.random(config.minDelay * 100, config.maxDelay * 100) / 100
+    return delay
 end
 
--- Basic anti-detection
-local function setupAntiKick()
-    -- Simple hook to ignore kick remotes
-    for _, v in pairs(getgc()) do
-        if type(v) == "function" and getfenv(v).script and getfenv(v).script.Name:lower():find("security") then
-            hookfunction(v, function() return nil end)
-        end
+local function humanizedWait(min, max)
+    min = min or config.minDelay
+    max = max or config.maxDelay
+    wait(math.random(min * 100, max * 100) / 100)
+end
+
+-- Function to move to position instead of teleporting
+local function moveToPosition(targetPosition, maxDistance)
+    if not config.useWalkInstead then
+        -- Just teleport if humanized movement is disabled
+        rootPart.CFrame = CFrame.new(targetPosition)
+        return
     end
     
-    -- Simple anti-teleport detection
-    game:GetService("Players").LocalPlayer.Character.Humanoid:SetStateEnabled(Enum.HumanoidStateType.Dead, false)
+    local distance = (targetPosition - rootPart.Position).Magnitude
+    
+    -- If distance is too great, use a series of shorter teleports
+    if distance > (maxDistance or 50) and config.avoidInstantTeleport then
+        local steps = math.ceil(distance / (maxDistance or 50))
+        local stepVector = (targetPosition - rootPart.Position) / steps
+        
+        for i = 1, steps do
+            local nextPos = rootPart.Position + stepVector
+            rootPart.CFrame = CFrame.new(nextPos)
+            humanizedWait(0.2, 0.5)
+            
+            -- Add random offset to path to appear more human-like
+            if config.humanizeMovement and i < steps then
+                local randomOffset = Vector3.new(
+                    math.random(-3, 3),
+                    0,
+                    math.random(-3, 3)
+                )
+                rootPart.CFrame = CFrame.new(nextPos + randomOffset)
+                humanizedWait(0.1, 0.3)
+            end
+        end
+    else
+        -- For shorter distances, use normal teleport with humanized delay
+        rootPart.CFrame = CFrame.new(targetPosition)
+    end
+    
+    humanizedWait(0.3, 0.7)
 end
 
 -- Function to find nearest tree
-function findNearestTree()
+local function findNearestTree()
     local nearestTree = nil
     local minDistance = math.huge
     
-    for _, treeType in ipairs(config.treeTypes) do
-        for _, v in pairs(workspace:GetDescendants()) do
-            if v.Name:lower():find(treeType:lower()) and v:IsA("Model") then
-                local trunk = v:FindFirstChild("Trunk") or v:FindFirstChild("WoodSection")
-                
-                if trunk then
-                    local distance = (trunk.Position - character.HumanoidRootPart.Position).Magnitude
-                    if distance < minDistance then
-                        nearestTree = v
-                        minDistance = distance
-                    end
+    -- Randomize tree search to reduce pattern detection
+    local searchOrder = {}
+    for i, treeType in ipairs(config.treeTypes) do
+        searchOrder[i] = treeType
+    end
+    
+    -- Shuffle tree types if randomizing actions
+    if config.randomizeActions then
+        for i = #searchOrder, 2, -1 do
+            local j = math.random(i)
+            searchOrder[i], searchOrder[j] = searchOrder[j], searchOrder[i]
+        end
+    end
+    
+    for _, treeType in ipairs(searchOrder) do
+        for _, tree in pairs(workspace:GetDescendants()) do
+            if tree.Name:find(treeType) and tree:FindFirstChild("Trunk") then
+                local distance = (rootPart.Position - tree.Trunk.Position).Magnitude
+                if distance < minDistance then
+                    nearestTree = tree
+                    minDistance = distance
                 end
             end
         end
@@ -166,60 +145,70 @@ function findNearestTree()
     return nearestTree
 end
 
--- Function to teleport to position
-function teleportTo(position)
-    character.HumanoidRootPart.CFrame = CFrame.new(position)
-    wait(0.5) -- Basic wait to allow game to register position
-end
-
 -- Function to equip axe
-function equipAxe()
+local function equipAxe()
     for _, tool in pairs(player.Backpack:GetChildren()) do
-        if tool:IsA("Tool") and tool.Name:lower():find("axe") then
-            character.Humanoid:EquipTool(tool)
-            wait(0.3)
+        if tool:IsA("Tool") and tool.Name:find("Axe") then
+            humanoid:EquipTool(tool)
+            humanizedWait()
             return tool
         end
     end
     return nil
 end
 
--- Function to cut tree
-function cutTree(tree)
+-- Function to cut tree with human-like behavior
+local function cutTree(tree)
     local axe = equipAxe()
     if not axe then
-        StatusLabel.Text = "Status: No axe found!"
+        statusSection:UpdateSection("Status: No axe found in inventory!")
         return false
     end
     
-    local trunk = tree:FindFirstChild("Trunk") or tree:FindFirstChild("WoodSection")
-    if not trunk then return false end
+    -- Move to tree with some randomness in position
+    local randomOffset = Vector3.new(math.random(-2, 2), math.random(3, 6), math.random(-2, 2))
+    moveToPosition(tree.Trunk.Position + randomOffset)
     
-    teleportTo(trunk.Position + Vector3.new(0, 5, 0))
-    wait(0.5)
-    
-    -- Simple cutting
-    for i = 1, 8 do
+    -- Simulate more human-like cutting
+    local cutTimes = math.random(8, 12) -- Random number of cuts
+    for i = 1, cutTimes do
         if not farming then break end
-        axe:Activate()
-        wait(0.3)
+        
+        if config.simulateHumanClicks then
+            -- Simulate human clicking pattern
+            axe:Activate()
+            humanizedWait(0.1, 0.4)
+            
+            -- Occasionally pause between cuts
+            if math.random(1, 5) == 1 then
+                humanizedWait(0.5, 1.2)
+                
+                -- Sometimes slightly change position during cutting
+                if config.humanizeMovement and math.random(1, 3) == 1 then
+                    local smallOffset = Vector3.new(math.random(-1, 1), math.random(0, 1), math.random(-1, 1))
+                    rootPart.CFrame = CFrame.new(rootPart.Position + smallOffset)
+                end
+            end
+        else
+            axe:Activate()
+            wait(0.2)
+        end
     end
     
     stats.treesCut = stats.treesCut + 1
-    updateStats()
     return true
 end
 
--- Function to find processor
-function findProcessor()
+-- Function to find processor (sawmill)
+local function findProcessor()
     local nearestProcessor = nil
     local minDistance = math.huge
     
-    for _, v in pairs(workspace:GetDescendants()) do
-        if v.Name:lower():find(config.processorName:lower()) then
-            local distance = (v.Position - character.HumanoidRootPart.Position).Magnitude
+    for _, obj in pairs(workspace:GetDescendants()) do
+        if obj.Name:find(config.processorName) then
+            local distance = (rootPart.Position - obj.Position).Magnitude
             if distance < minDistance then
-                nearestProcessor = v
+                nearestProcessor = obj
                 minDistance = distance
             end
         end
@@ -228,131 +217,315 @@ function findProcessor()
     return nearestProcessor
 end
 
--- Function to process logs
-function processLogs()
+-- Function to process logs with anti-detection
+local function processLogs()
     local processor = findProcessor()
     if not processor then
-        StatusLabel.Text = "Status: No sawmill found!"
+        statusSection:UpdateSection("Status: No processor found!")
         return false
     end
     
-    teleportTo(processor.Position + Vector3.new(0, 5, 0))
-    wait(1)
+    -- Move to processor instead of teleporting directly
+    moveToPosition(processor.Position + Vector3.new(math.random(-2, 2), 3, math.random(-2, 2)))
+    humanizedWait(0.8, 1.5)
     
-    -- Find and move logs
-    local logsFound = 0
-    for _, v in pairs(workspace:GetDescendants()) do
-        if v.Name:lower():find("log") and v:IsA("Part") and (v.Position - character.HumanoidRootPart.Position).Magnitude < 30 then
-            -- Use game's own drag function if possible
-            game:GetService("ReplicatedStorage").Interaction.ClientIsDragging:FireServer(v, processor.Position)
-            wait(0.5)
-            logsFound = logsFound + 1
+    local logsProcessed = 0
+    -- Find logs in character proximity and move them to processor
+    for _, obj in pairs(workspace:GetDescendants()) do
+        if obj.Name:find("Log") and (obj.Position - rootPart.Position).Magnitude < 20 then
+            -- Random delay between processing logs
+            if logsProcessed > 0 and config.randomizeActions then
+                humanizedWait(0.3, 0.9)
+            end
+            
+            -- Use Xeno's remote hook to move object
+            local args = {
+                [1] = obj,
+                [2] = processor.Position + Vector3.new(math.random(-1, 1), 0, math.random(-1, 1))
+            }
+            game:GetService("ReplicatedStorage").Interaction.ClientIsDragging:FireServer(unpack(args))
+            
+            logsProcessed = logsProcessed + 1
             stats.logsProcessed = stats.logsProcessed + 1
             
-            -- Don't try to process too many at once
-            if logsFound >= 3 then break end
+            -- Don't process too many logs at once to avoid detection
+            if logsProcessed >= 3 and config.randomizeActions then
+                humanizedWait(1, 2)
+                logsProcessed = 0
+            end
         end
     end
     
-    updateStats()
-    return logsFound > 0
+    return true
 end
 
 -- Function to find sell location
-function findSellLocation()
-    for _, v in pairs(workspace:GetDescendants()) do
-        if (v.Name:lower():find("cashier") or v.Name:lower():find("seller") or v.Name:lower():find("woodrus")) and v:IsA("Model") then
-            -- Look for sell parts
-            for _, child in pairs(v:GetDescendants()) do
-                if child.Name:lower():find("sell") or child.Name:lower():find("counter") or child.Name:lower():find("pad") then
-                    return child
+local function findSellLocation()
+    local sellLocation = nil
+    
+    for _, obj in pairs(workspace:GetDescendants()) do
+        if obj.Name:find(config.sellNPCName) then
+            for _, child in pairs(obj:GetDescendants()) do
+                if child.Name:find(config.sellPadName) then
+                    sellLocation = child
+                    break
                 end
             end
-            return v -- If no specific part found, return the model
         end
     end
-    return nil
+    
+    return sellLocation
 end
 
--- Function to sell wood
-function sellWood()
+-- Function to sell wood with anti-detection
+local function sellWood()
     local sellPad = findSellLocation()
     if not sellPad then
-        StatusLabel.Text = "Status: Sell location not found!"
+        statusSection:UpdateSection("Status: Sell location not found!")
         return false
     end
     
-    teleportTo(sellPad.Position + Vector3.new(0, 5, 0))
-    wait(1)
+    -- Move to sell pad with human-like movement
+    moveToPosition(sellPad.Position + Vector3.new(math.random(-2, 2), 2, math.random(-2, 2)))
+    humanizedWait(1, 2.5) -- Wait longer at sell pad to appear more natural
     
-    -- Attempt to sell using common remotes
-    local soldSomething = false
-    local remotes = {"ClientRequestSellWood", "Sell", "SellWood", "RequestSellWood"}
+    -- Simulate selling (the game might have a specific remote to fire)
+    local previousMoney = player.leaderstats.Money.Value
     
-    for _, remoteName in ipairs(remotes) do
-        local remote = game:GetService("ReplicatedStorage"):FindFirstChild(remoteName, true)
-        if remote then
-            remote:FireServer(sellPad)
-            soldSomething = true
-            break
+    -- Add some randomness to the sell action
+    if config.randomizeActions then
+        for i = 1, math.random(1, 3) do
+            game:GetService("ReplicatedStorage").Interaction.ClientRequestSellWood:FireServer(sellPad)
+            humanizedWait(0.5, 1.2)
         end
+    else
+        game:GetService("ReplicatedStorage").Interaction.ClientRequestSellWood:FireServer(sellPad)
+        wait(1)
     end
     
-    -- If no specific remote found, try common patterns
-    if not soldSomething then
-        for _, v in pairs(game:GetService("ReplicatedStorage"):GetDescendants()) do
-            if v:IsA("RemoteEvent") and (v.Name:lower():find("sell") or v.Name:lower():find("purchase")) then
-                v:FireServer(sellPad)
-                soldSomething = true
-                break
+    humanizedWait(0.8, 1.5)
+    
+    local newMoney = player.leaderstats.Money.Value
+    local earned = newMoney - previousMoney
+    
+    if earned > 0 then
+        stats.woodSold = stats.woodSold + 1
+        stats.moneyEarned = stats.moneyEarned + earned
+        return true
+    else
+        return false
+    end
+end
+
+-- Anti-kick hook using Xeno's protections
+local function setupAntiKick()
+    -- Hook the kick remote to prevent it from firing
+    local oldNamecall
+    oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+        local args = {...}
+        local method = getnamecallmethod()
+        
+        -- Block kick and other anti-exploit remotes
+        if method == "FireServer" or method == "InvokeServer" then
+            local remoteName = self.Name:lower()
+            if remoteName:find("kick") or 
+               remoteName:find("ban") or 
+               remoteName:find("report") or 
+               remoteName:find("detect") or 
+               remoteName:find("anti") then
+                return nil
+            end
+        end
+        
+        return oldNamecall(self, ...)
+    end)
+    
+    -- Bypass walkspeed check
+    local mt = getrawmetatable(game)
+    local old = mt.__index
+    setreadonly(mt, false)
+    
+    mt.__index = newcclosure(function(t, k)
+        if t == humanoid and k == "WalkSpeed" then
+            return 16
+        end
+        return old(t, k)
+    end)
+    
+    setreadonly(mt, true)
+    
+    -- Disable game anti-cheat scripts if they exist
+    for _, script in pairs(game:GetDescendants()) do
+        if script:IsA("Script") or script:IsA("LocalScript") then
+            if script.Name:lower():find("anti") or 
+               script.Name:lower():find("cheat") or 
+               script.Name:lower():find("detect") then
+                pcall(function()
+                    script.Disabled = true
+                end)
             end
         end
     end
-    
-    if soldSomething then
-        stats.woodSold = stats.woodSold + 1
-        updateStats()
-        return true
-    end
-    
-    return false
 end
 
--- Main farming function
-function startFarming()
-    -- Apply basic anti-kick
-    pcall(setupAntiKick)
+-- Main farming function with anti-detection behaviors
+local function startFarming()
+    -- Set up anti-kick protections
+    setupAntiKick()
     
-    -- Main loop
-    coroutine.wrap(function()
-        while farming do
-            StatusLabel.Text = "Status: Finding tree..."
-            local tree = findNearestTree()
-            
-            if tree then
-                StatusLabel.Text = "Status: Cutting tree..."
-                if cutTree(tree) then
-                    wait(config.autoDelay)
+    while farming do
+        statusSection:UpdateSection("Status: Looking for trees...")
+        local tree = findNearestTree()
+        
+        if tree then
+            statusSection:UpdateSection("Status: Approaching tree...")
+            if cutTree(tree) then
+                humanizedWait(0.8, 1.5)
+                
+                -- Sometimes take a break between actions to appear more human
+                if config.humanizeMovement and math.random(1, 10) == 1 then
+                    statusSection:UpdateSection("Status: Taking a short break...")
+                    humanizedWait(2, 5)
+                end
+                
+                statusSection:UpdateSection("Status: Processing wood...")
+                if processLogs() then
+                    humanizedWait(0.8, 1.5)
                     
-                    StatusLabel.Text = "Status: Processing logs..."
-                    if processLogs() then
-                        wait(config.autoDelay)
-                        
-                        if selling then
-                            StatusLabel.Text = "Status: Selling wood..."
+                    -- Auto sell if enabled
+                    if selling then
+                        -- Don't sell after every tree to avoid patterns
+                        if not config.randomizeActions or math.random(1, 3) == 1 then
+                            statusSection:UpdateSection("Status: Going to sell...")
                             sellWood()
-                            wait(config.autoDelay)
+                            humanizedWait(1, 2)
                         end
                     end
                 end
-            else
-                StatusLabel.Text = "Status: No trees found!"
-                wait(3)
             end
-            
+        else
+            statusSection:UpdateSection("Status: No trees found nearby!")
+            humanizedWait(3, 7) -- Longer wait when no trees found
+        end
+        
+        -- Update stats display
+        updateStatsDisplay()
+        
+        -- Randomize wait time between cycles
+        if config.randomizeActions then
+            humanizedWait(1, 3)
+        else
             wait(0.5)
         end
-    end)()
+    end
+    
+    statusSection:UpdateSection("Status: Helper stopped.")
+}
+
+-- Update stats display
+function updateStatsDisplay()
+    local statsText = string.format(
+        "Trees: %d\nLogs: %d\nSold: %d\nEarned: %d",
+        stats.treesCut, stats.logsProcessed, stats.woodSold, stats.moneyEarned
+    )
+    statusSection:UpdateSection("Stats:\n" .. statsText)
 end
 
-StatusLabel.Text = "Status: Script loaded!"
+-- Button to toggle farming with less suspicious name
+farmingSection:NewToggle("Tree Helper", "Assists with tree harvesting", function(state)
+    farming = state
+    if farming then
+        statusSection:UpdateSection("Status: Helper started.")
+        
+        -- Set humanoid walk speed with anti-detection
+        if config.useWalkInstead then
+            local oldWalkSpeed = humanoid.WalkSpeed
+            spawn(function()
+                while farming do
+                    -- Set the actual walk speed while keeping the property readable as 16
+                    humanoid.WalkSpeed = config.walkSpeed
+                    wait(0.1)
+                end
+                humanoid.WalkSpeed = oldWalkSpeed
+            end)
+        end
+        
+        coroutine.wrap(startFarming)()
+    else
+        statusSection:UpdateSection("Status: Helper stopped.")
+    end
+end)
+
+-- Button to toggle auto sell with better naming
+farmingSection:NewToggle("Auto Delivery", "Automatically deliver wood", function(state)
+    selling = state
+    if selling then
+        statusSection:UpdateSection("Auto delivery enabled")
+    else
+        statusSection:UpdateSection("Auto delivery disabled")
+    end
+end)
+
+-- Button to sell manually
+farmingSection:NewButton("Deliver Now", "Manually deliver wood", function()
+    statusSection:UpdateSection("Status: Delivering wood...")
+    if sellWood() then
+        statusSection:UpdateSection("Status: Wood delivered successfully!")
+    else
+        statusSection:UpdateSection("Status: Failed to deliver wood!")
+    end
+    humanizedWait(0.8, 1.5)
+    updateStatsDisplay()
+end)
+
+-- Settings for distances
+settingsSection:NewSlider("Working Distance", "Distance to work with tree", 20, 5, function(value)
+    config.cutDistance = value
+end)
+
+settingsSection:NewSlider("Delivery Delay", "Time between deliveries", 30, 5, function(value)
+    config.autoSellDelay = value
+end)
+
+-- Anti-detection settings
+antiDetectionSection:NewToggle("Human Movement", "Move more like a human player", function(state)
+    config.humanizeMovement = state
+end)
+
+antiDetectionSection:NewToggle("Action Randomizer", "Add random delays to actions", function(state)
+    config.randomizeActions = state
+end)
+
+antiDetectionSection:NewToggle("Walk Instead of Teleport", "Use walking for shorter distances", function(state)
+    config.useWalkInstead = state
+end)
+
+antiDetectionSection:NewSlider("Min Action Delay", "Minimum delay between actions", 10, 1, function(value)
+    config.minDelay = value / 10
+end)
+
+antiDetectionSection:NewSlider("Max Action Delay", "Maximum delay between actions", 20, 5, function(value)
+    config.maxDelay = value / 10
+end)
+
+antiDetectionSection:NewSlider("Movement Speed", "How fast to move when walking", 30, 10, function(value)
+    config.walkSpeed = value
+end)
+
+-- Button to reset stats
+settingsSection:NewButton("Reset Stats", "Reset all statistics", function()
+    stats = {
+        treesCut = 0,
+        logsProcessed = 0,
+        woodSold = 0,
+        moneyEarned = 0
+    }
+    updateStatsDisplay()
+end)
+
+-- Initialize UI
+statusSection:UpdateSection("Status: Helper loaded successfully!")
+updateStatsDisplay()
+
+-- Set up additional anti-kick measures on initial load
+setupAntiKick()
