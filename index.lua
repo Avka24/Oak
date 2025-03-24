@@ -1,647 +1,517 @@
---[[
-    Auto Farming Wood Script (Debug Version)
-    Compatible with Xeno PC executor for Oaklands
-    Features:
-    - Finds nearest trees
-    - Cuts wood
-    - Processes logs
-    - Sells to NPC
-    - Enhanced debugging
-]]
+-- Blox Fruits Premium Script Hub
+-- Created on March 25, 2025
+
+local OrionLib = loadstring(game:HttpGet(('https://raw.githubusercontent.com/shlexware/Orion/main/source')))()
+local Window = OrionLib:MakeWindow({Name = "Premium Blox Fruits Hub", HidePremium = false, SaveConfig = true, ConfigFolder = "BloxFruitsPremium"})
 
 -- Variables
-local player = game.Players.LocalPlayer
-local character = player.Character or player.CharacterAdded:Wait()
-local farming = false
-local selling = false
-local debug_mode = true -- Set to true to show more detailed status messages
+local plr = game:GetService("Players").LocalPlayer
+local rep = game:GetService("ReplicatedStorage")
+local workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local TeleportService = game:GetService("TeleportService")
+local VirtualUser = game:GetService("VirtualUser")
 
--- Print debug info function
-local function debugPrint(message)
-    if debug_mode then
-        print("DEBUG: " .. message)
+-- Anti-AFK
+plr.Idled:Connect(function()
+    VirtualUser:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+    wait(1)
+    VirtualUser:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+end)
+
+-- Main Tab
+local MainTab = Window:MakeTab({
+    Name = "Main",
+    Icon = "rbxassetid://4483345998",
+    PremiumOnly = false
+})
+
+local FarmSection = MainTab:AddSection({
+    Name = "Auto Farm"
+})
+
+-- Auto Farm Functions
+local autoFarm = false
+local mobSelected = "Bandit"
+local mobsTable = {}
+
+for i, v in pairs(workspace.Enemies:GetChildren()) do
+    if not table.find(mobsTable, v.Name) then
+        table.insert(mobsTable, v.Name)
     end
 end
 
-debugPrint("Script starting...")
-
--- Configuration
-local config = {
-    treeTypes = {"Pine", "Oak", "Birch", "Walnut", "Elm", "Palm", "Koa", "Snow", "Fir", "Tree"}, -- Added generic "Tree"
-    sellNPCName = "Cashier",
-    processorName = "Sawmill",
-    autoDelay = 1.5
-}
-
--- Create simple UI
-debugPrint("Creating UI...")
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Parent = game:GetService("CoreGui")
-ScreenGui.Name = "OaklandHelper"
-ScreenGui.ResetOnSpawn = false
-
-local MainFrame = Instance.new("Frame")
-MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0, 250, 0, 300)
-MainFrame.Position = UDim2.new(0.8, 0, 0.3, 0)
-MainFrame.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-MainFrame.BorderSizePixel = 0
-MainFrame.Active = true
-MainFrame.Draggable = true
-MainFrame.Parent = ScreenGui
-
-local Title = Instance.new("TextLabel")
-Title.Name = "Title"
-Title.Size = UDim2.new(1, 0, 0, 30)
-Title.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-Title.TextColor3 = Color3.fromRGB(255, 255, 255)
-Title.Text = "Oakland Helper"
-Title.TextSize = 18
-Title.Font = Enum.Font.SourceSansBold
-Title.Parent = MainFrame
-
-local StatusLabel = Instance.new("TextLabel")
-StatusLabel.Name = "Status"
-StatusLabel.Size = UDim2.new(1, -20, 0, 30)
-StatusLabel.Position = UDim2.new(0, 10, 0, 40)
-StatusLabel.BackgroundTransparency = 1
-StatusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-StatusLabel.Text = "Status: Script loaded"
-StatusLabel.TextSize = 14
-StatusLabel.Font = Enum.Font.SourceSans
-StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
-StatusLabel.Parent = MainFrame
-
-local DebugLabel = Instance.new("TextLabel")
-DebugLabel.Name = "Debug"
-DebugLabel.Size = UDim2.new(1, -20, 0, 30)
-DebugLabel.Position = UDim2.new(0, 10, 0, 70)
-DebugLabel.BackgroundTransparency = 1
-DebugLabel.TextColor3 = Color3.fromRGB(255, 200, 200)
-DebugLabel.Text = "Debug: Idle"
-DebugLabel.TextSize = 12
-DebugLabel.Font = Enum.Font.SourceSans
-DebugLabel.TextXAlignment = Enum.TextXAlignment.Left
-DebugLabel.Parent = MainFrame
-
-local StatsLabel = Instance.new("TextLabel")
-StatsLabel.Name = "Stats"
-StatsLabel.Size = UDim2.new(1, -20, 0, 40)
-StatsLabel.Position = UDim2.new(0, 10, 0, 100)
-StatsLabel.BackgroundTransparency = 1
-StatsLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-StatsLabel.Text = "Trees: 0 | Logs: 0 | Sold: 0"
-StatsLabel.TextSize = 14
-StatsLabel.Font = Enum.Font.SourceSans
-StatsLabel.TextXAlignment = Enum.TextXAlignment.Left
-StatsLabel.Parent = MainFrame
-
--- Stats tracking
-local stats = {
-    treesCut = 0,
-    logsProcessed = 0,
-    woodSold = 0
-}
-
-function updateStats()
-    StatsLabel.Text = string.format(
-        "Trees: %d | Logs: %d | Sold: %d",
-        stats.treesCut, stats.logsProcessed, stats.woodSold
-    )
-end
-
-function updateStatus(text)
-    StatusLabel.Text = "Status: " .. text
-    debugPrint(text)
-end
-
-function updateDebug(text)
-    DebugLabel.Text = "Debug: " .. text
-end
-
--- Check if HumanoidRootPart exists
-function checkCharacter()
-    if not player.Character then
-        updateStatus("No character found")
-        updateDebug("Waiting for character to load")
-        character = player.CharacterAdded:Wait()
-        updateStatus("Character loaded")
+FarmSection:AddDropdown({
+    Name = "Select Mob",
+    Default = "Bandit",
+    Options = mobsTable,
+    Callback = function(Value)
+        mobSelected = Value
     end
-    
-    if not character:FindFirstChild("HumanoidRootPart") then
-        updateStatus("No HumanoidRootPart found")
-        updateDebug("This is a critical error")
-        return false
-    end
-    
-    if not character:FindFirstChild("Humanoid") then
-        updateStatus("No Humanoid found")
-        updateDebug("This is a critical error")
-        return false
-    end
-    
-    return true
-}
+})
 
--- Function to find nearest tree
-function findNearestTree()
-    if not checkCharacter() then return nil end
-    
-    updateDebug("Scanning for trees...")
-    local nearestTree = nil
-    local minDistance = math.huge
-    local foundCount = 0
-    
-    for _, treeType in ipairs(config.treeTypes) do
-        for _, v in pairs(workspace:GetDescendants()) do
-            if v.Name:lower():find(treeType:lower()) and (v:IsA("Model") or v:IsA("Part")) then
-                foundCount = foundCount + 1
-                
-                -- Try to find trunk or main part
-                local trunk = nil
-                if v:IsA("Model") then
-                    trunk = v:FindFirstChild("Trunk") or v:FindFirstChild("WoodSection") or 
-                           v:FindFirstChild("Wood") or v:FindFirstChildOfClass("Part")
-                else
-                    trunk = v -- If it's a part, use it directly
+FarmSection:AddToggle({
+    Name = "Auto Farm",
+    Default = false,
+    Callback = function(Value)
+        autoFarm = Value
+        if autoFarm then
+            AutoFarmFunction()
+        end
+    end
+})
+
+function AutoFarmFunction()
+    spawn(function()
+        while autoFarm do
+            pcall(function()
+                for i, v in pairs(workspace.Enemies:GetChildren()) do
+                    if v.Name == mobSelected and v:FindFirstChild("HumanoidRootPart") and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 then
+                        repeat
+                            wait()
+                            plr.Character.HumanoidRootPart.CFrame = v.HumanoidRootPart.CFrame * CFrame.new(0, 10, 0)
+                            plr.Character.Humanoid:ChangeState(11)
+                            game:GetService("VirtualUser"):CaptureController()
+                            game:GetService("VirtualUser"):ClickButton1(Vector2.new(851, 158), game:GetService("Workspace").Camera.CFrame)
+                        until not autoFarm or not v or not v:FindFirstChild("Humanoid") or v.Humanoid.Health <= 0
+                    end
                 end
-                
-                if trunk then
-                    local distance = (trunk.Position - character.HumanoidRootPart.Position).Magnitude
-                    if distance < minDistance and distance < 500 then
-                        nearestTree = v
-                        minDistance = distance
+            end)
+            wait()
+        end
+    end)
+end
+
+-- Stats Tab
+local StatsTab = Window:MakeTab({
+    Name = "Stats",
+    Icon = "rbxassetid://4483345998",
+    PremiumOnly = false
+})
+
+local StatsSection = StatsTab:AddSection({
+    Name = "Auto Stats"
+})
+
+local stats = {"Melee", "Defense", "Sword", "Gun", "Demon Fruit"}
+local selectedStat = "Melee"
+local autoStats = false
+
+StatsSection:AddDropdown({
+    Name = "Select Stat",
+    Default = "Melee",
+    Options = stats,
+    Callback = function(Value)
+        selectedStat = Value
+    end
+})
+
+StatsSection:AddToggle({
+    Name = "Auto Stats",
+    Default = false,
+    Callback = function(Value)
+        autoStats = Value
+        if autoStats then
+            AutoStatFunction()
+        end
+    end
+})
+
+function AutoStatFunction()
+    spawn(function()
+        while autoStats do
+            local args = {
+                [1] = "AddPoint",
+                [2] = selectedStat,
+                [3] = 1
+            }
+            rep.Remotes.CommF_:InvokeServer(unpack(args))
+            wait(0.1)
+        end
+    end)
+end
+
+-- Teleport Tab
+local TeleportTab = Window:MakeTab({
+    Name = "Teleport",
+    Icon = "rbxassetid://4483345998",
+    PremiumOnly = false
+})
+
+local IslandSection = TeleportTab:AddSection({
+    Name = "Islands"
+})
+
+local islands = {
+    ["Starter Island"] = CFrame.new(1071.2832, 16.3085976, 1426.86792),
+    ["Marine Island"] = CFrame.new(-2573.3374, 6.88881969, 2046.99817),
+    ["Middle Town"] = CFrame.new(-655.824158, 7.88708115, 1436.67908),
+    ["Jungle"] = CFrame.new(-1249.77222, 11.8870859, 341.356476),
+    ["Pirate Village"] = CFrame.new(-1122.34998, 4.78708982, 3855.91992),
+    ["Desert"] = CFrame.new(1094.14587, 6.47350502, 4192.88721),
+    ["Frozen Village"] = CFrame.new(1198.00928, 27.0074959, -1211.73376),
+    ["Marine Fort"] = CFrame.new(-4505.375, 20.687294, 4260.55908),
+    ["Colosseum"] = CFrame.new(-1428.35474, 7.38933945, -3014.37305),
+    ["Sky Island 1"] = CFrame.new(-4970.21875, 717.707275, -2622.35449),
+    ["Sky Island 2"] = CFrame.new(-4813.0249, 903.708557, -1912.69922),
+    ["Sky Island 3"] = CFrame.new(-7952.31006, 5545.52832, -320.704956),
+    ["Prison"] = CFrame.new(4854.16455, 5.68742752, 740.194641),
+    ["Magma Village"] = CFrame.new(-5231.75879, 8.61593437, 8467.87695),
+    ["Underwater City"] = CFrame.new(61163.8516, 11.7796783, 1819.78418),
+    ["Fountain City"] = CFrame.new(5132.93506, 4.49374619, 4037.83252),
+    ["House of Davy Jones"] = CFrame.new(-3068.91162, 236.881363, -10141.2627),
+    ["Port Town"] = CFrame.new(-290.610596, 6.72999573, 5343.55908),
+    ["Castle on the Sea"] = CFrame.new(-5074.45556, 314.5155, -2991.18213),
+    ["Mansion"] = CFrame.new(-12548.998, 332.403961, -7603.53564),
+    ["Hydra Island"] = CFrame.new(5228.8584, 604.391052, 345.0400),
+    ["Temple of Time"] = CFrame.new(28286.35, 14896.4951, 102.624695)
+}
+
+for i, v in pairs(islands) do
+    IslandSection:AddButton({
+        Name = i,
+        Callback = function()
+            plr.Character.HumanoidRootPart.CFrame = v
+        end
+    })
+end
+
+-- Fruits Tab
+local FruitTab = Window:MakeTab({
+    Name = "Fruits",
+    Icon = "rbxassetid://4483345998",
+    PremiumOnly = false
+})
+
+local FruitSection = FruitTab:AddSection({
+    Name = "Devil Fruits"
+})
+
+FruitSection:AddToggle({
+    Name = "Auto Collect Fruits",
+    Default = false,
+    Callback = function(Value)
+        autoCollectFruits = Value
+        if autoCollectFruits then
+            CollectFruitsFunction()
+        end
+    end
+})
+
+function CollectFruitsFunction()
+    spawn(function()
+        while autoCollectFruits do
+            for i, v in pairs(workspace:GetChildren()) do
+                if v:IsA("Tool") and v:FindFirstChild("Handle") then
+                    plr.Character.HumanoidRootPart.CFrame = v.Handle.CFrame
+                    wait(0.5)
+                end
+            end
+            wait(1)
+        end
+    end)
+end
+
+FruitSection:AddToggle({
+    Name = "ESP Fruits",
+    Default = false,
+    Callback = function(Value)
+        espFruits = Value
+        if espFruits then
+            FruitESPFunction()
+        else
+            for i, v in pairs(workspace:GetChildren()) do
+                if v:IsA("Tool") and v:FindFirstChild("Handle") then
+                    if v.Handle:FindFirstChild("BillboardGui") then
+                        v.Handle.BillboardGui:Destroy()
                     end
                 end
             end
         end
     end
-    
-    updateDebug("Found " .. foundCount .. " tree objects")
-    return nearestTree
-}
+})
 
--- Function to teleport to position
-function teleportTo(position)
-    if not checkCharacter() then return false end
-    
-    updateDebug("Teleporting to position")
-    character.HumanoidRootPart.CFrame = CFrame.new(position)
-    task.wait(0.5)
-    return true
-}
-
--- Function to equip axe
-function equipAxe()
-    if not checkCharacter() then return nil end
-    
-    updateDebug("Searching for axe...")
-    local humanoid = character:FindFirstChild("Humanoid")
-    
-    -- First check if already equipped
-    for _, tool in pairs(character:GetChildren()) do
-        if tool:IsA("Tool") and (tool.Name:lower():find("axe") or tool.Name:lower():find("knife")) then
-            updateDebug("Already equipped: " .. tool.Name)
-            return tool
-        end
-    end
-    
-    -- Try to equip from backpack
-    for _, tool in pairs(player.Backpack:GetChildren()) do
-        if tool:IsA("Tool") and (tool.Name:lower():find("axe") or tool.Name:lower():find("knife")) then
-            humanoid:EquipTool(tool)
-            updateDebug("Equipped: " .. tool.Name)
-            task.wait(0.3)
-            return tool
-        end
-    end
-    
-    updateStatus("No axe or cutting tool found!")
-    return nil
-}
-
--- Function to cut tree
-function cutTree(tree)
-    if not checkCharacter() then return false end
-    updateStatus("Preparing to cut tree")
-    
-    local axe = equipAxe()
-    if not axe then
-        updateStatus("Cannot cut without tool")
-        return false
-    end
-    
-    local trunk = nil
-    if tree:IsA("Model") then
-        trunk = tree:FindFirstChild("Trunk") or tree:FindFirstChild("WoodSection") or 
-              tree:FindFirstChild("Wood") or tree:FindFirstChildOfClass("Part")
-    else
-        trunk = tree -- If it's a part, use it directly
-    end
-    
-    if not trunk then 
-        updateStatus("No valid trunk found")
-        return false 
-    end
-    
-    updateStatus("Moving to tree")
-    teleportTo(trunk.Position + Vector3.new(0, 3, 0))
-    task.wait(0.3)
-    
-    updateStatus("Cutting tree...")
-    
-    -- Simple cutting loop
-    for i = 1, 8 do
-        if not farming then 
-            updateStatus("Cutting interrupted")
-            break 
-        end
-        
-        -- Try different methods to activate tool
-        pcall(function() axe:Activate() end)
-        -- Alternative way to use tool (in case Activate doesn't work)
-        pcall(function()
-            for _, v in pairs(game:GetService("ReplicatedStorage"):GetDescendants()) do
-                if v:IsA("RemoteEvent") and (v.Name:lower():find("cut") or v.Name:lower():find("chop") or 
-                   v.Name:lower():find("tool") or v.Name:lower():find("axe")) then
-                    v:FireServer(trunk)
-                end
-            end
-        end)
-        
-        task.wait(0.3)
-        updateDebug("Cutting attempt " .. i)
-    end
-    
-    updateStatus("Tree cut complete")
-    stats.treesCut = stats.treesCut + 1
-    updateStats()
-    return true
-}
-
--- Function to find processor
-function findProcessor()
-    if not checkCharacter() then return nil end
-    
-    updateDebug("Searching for sawmill...")
-    local nearestProcessor = nil
-    local minDistance = math.huge
-    local foundCount = 0
-    
-    for _, v in pairs(workspace:GetDescendants()) do
-        if (v.Name:lower():find(config.processorName:lower()) or 
-            v.Name:lower():find("mill") or 
-            v.Name:lower():find("saw") or
-            v.Name:lower():find("process")) then
-            
-            foundCount = foundCount + 1
-            local mainPart = v:IsA("Model") and (v:FindFirstChildOfClass("Part") or v:FindFirstChildWhichIsA("BasePart")) or v
-            
-            if mainPart then
-                local distance = (mainPart.Position - character.HumanoidRootPart.Position).Magnitude
-                if distance < minDistance and distance < 1000 then
-                    nearestProcessor = v
-                    minDistance = distance
-                end
-            end
-        end
-    end
-    
-    updateDebug("Found " .. foundCount .. " processor objects")
-    return nearestProcessor
-}
-
--- Function to process logs
-function processLogs()
-    if not checkCharacter() then return false end
-    
-    local processor = findProcessor()
-    if not processor then
-        updateStatus("No sawmill found")
-        return false
-    end
-    
-    local processorPart = processor:IsA("Model") and 
-                         (processor:FindFirstChildOfClass("Part") or 
-                          processor:FindFirstChildWhichIsA("BasePart")) or processor
-    
-    if not processorPart then
-        updateStatus("Invalid sawmill structure")
-        return false
-    end
-    
-    updateStatus("Moving to sawmill")
-    teleportTo(processorPart.Position + Vector3.new(0, 5, 0))
-    task.wait(1)
-    
-    -- Find and move logs
-    updateStatus("Finding logs to process")
-    local logsFound = 0
-    
-    for _, v in pairs(workspace:GetDescendants()) do
-        if (v.Name:lower():find("log") or v.Name:lower():find("wood")) and 
-           (v:IsA("Part") or v:IsA("Model")) and 
-           (v.Position - character.HumanoidRootPart.Position).Magnitude < 50 then
-            
-            -- Get the actual part if it's a model
-            local logPart = v:IsA("Model") and v:FindFirstChildOfClass("Part") or v
-            
-            if logPart then
-                updateDebug("Processing log: " .. v.Name)
-                
-                -- Try different methods to process logs
-                -- Method 1: Standard dragging
+function FruitESPFunction()
+    spawn(function()
+        while espFruits do
+            for i, v in pairs(workspace:GetChildren()) do
                 pcall(function()
-                    game:GetService("ReplicatedStorage").Interaction.ClientIsDragging:FireServer(logPart, processorPart.Position)
-                end)
-                
-                -- Method 2: Try to find processing remotes
-                pcall(function()
-                    for _, remote in pairs(game:GetService("ReplicatedStorage"):GetDescendants()) do
-                        if remote:IsA("RemoteEvent") and (remote.Name:lower():find("process") or 
-                           remote.Name:lower():find("saw") or remote.Name:lower():find("log")) then
-                            remote:FireServer(logPart, processorPart)
+                    if v:IsA("Tool") and v:FindFirstChild("Handle") then
+                        if not v.Handle:FindFirstChild("BillboardGui") then
+                            local BillboardGui = Instance.new("BillboardGui")
+                            local TextLabel = Instance.new("TextLabel")
+                            
+                            BillboardGui.Parent = v.Handle
+                            BillboardGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+                            BillboardGui.Active = true
+                            BillboardGui.Size = UDim2.new(0, 200, 0, 50)
+                            BillboardGui.StudsOffset = Vector3.new(0, 2, 0)
+                            BillboardGui.AlwaysOnTop = true
+                            
+                            TextLabel.Parent = BillboardGui
+                            TextLabel.BackgroundTransparency = 1
+                            TextLabel.Size = UDim2.new(0, 200, 0, 50)
+                            TextLabel.Text = v.Name
+                            TextLabel.TextColor3 = Color3.fromRGB(255, 0, 0)
+                            TextLabel.TextScaled = true
                         end
                     end
                 end)
-                
-                task.wait(0.7)
-                logsFound = logsFound + 1
-                stats.logsProcessed = stats.logsProcessed + 1
-                updateStats()
-                
-                -- Don't try to process too many at once
-                if logsFound >= 3 then 
-                    updateStatus("Processed " .. logsFound .. " logs")
-                    break 
-                end
             end
+            wait(1)
+        end
+    end)
+end
+
+-- Raids Tab
+local RaidsTab = Window:MakeTab({
+    Name = "Raids",
+    Icon = "rbxassetid://4483345998",
+    PremiumOnly = false
+})
+
+local RaidsSection = RaidsTab:AddSection({
+    Name = "Auto Raids"
+})
+
+local selectRaid = "Flame"
+local raidsTable = {"Flame", "Ice", "Quake", "Light", "Dark", "String", "Rumble", "Magma", "Human: Buddha", "Sand", "Bird: Phoenix", "Dough"}
+
+RaidsSection:AddDropdown({
+    Name = "Select Raid",
+    Default = "Flame",
+    Options = raidsTable,
+    Callback = function(Value)
+        selectRaid = Value
+    end
+})
+
+RaidsSection:AddToggle({
+    Name = "Auto Raid",
+    Default = false,
+    Callback = function(Value)
+        autoRaid = Value
+        if autoRaid then
+            AutoRaidFunction()
         end
     end
-    
-    if logsFound == 0 then
-        updateStatus("No logs found nearby")
-        return false
+})
+
+function AutoRaidFunction()
+    spawn(function()
+        while autoRaid do
+            local args = {
+                [1] = "RaidsNpc",
+                [2] = "Select",
+                [3] = selectRaid
+            }
+            rep.Remotes.CommF_:InvokeServer(unpack(args))
+            wait(0.5)
+            
+            local args = {
+                [1] = "Raid",
+                [2] = "Buy",
+                [3] = "1"
+            }
+            rep.Remotes.CommF_:InvokeServer(unpack(args))
+            wait(0.5)
+            
+            local args = {
+                [1] = "RaidPirateRaid",
+                [2] = "Initiate"
+            }
+            rep.Remotes.CommF_:InvokeServer(unpack(args))
+            
+            wait(5)
+        end
+    end)
+end
+
+-- Combat Tab
+local CombatTab = Window:MakeTab({
+    Name = "Combat",
+    Icon = "rbxassetid://4483345998",
+    PremiumOnly = false
+})
+
+local CombatSection = CombatTab:AddSection({
+    Name = "Auto Skills"
+})
+
+CombatSection:AddToggle({
+    Name = "Auto Skills",
+    Default = false,
+    Callback = function(Value)
+        autoSkills = Value
+        if autoSkills then
+            AutoSkillsFunction()
+        end
     end
-    
-    return true
+})
+
+local skills = {"Z", "X", "C", "V", "F"}
+local selectedSkills = {
+    Z = true,
+    X = true,
+    C = true,
+    V = true,
+    F = true
 }
 
--- Function to find sell location
-function findSellLocation()
-    if not checkCharacter() then return nil end
-    
-    updateDebug("Searching for sell location...")
-    local foundCount = 0
-    
-    -- Common names for sell locations in Oaklands and lumber games
-    local sellNames = {"cashier", "seller", "woodrus", "shop", "store", "sell", "merchant", "buyer"}
-    
-    for _, v in pairs(workspace:GetDescendants()) do
-        local foundMatch = false
-        for _, name in ipairs(sellNames) do
-            if v.Name:lower():find(name) then
-                foundMatch = true
-                break
-            end
+for i, v in pairs(skills) do
+    CombatSection:AddToggle({
+        Name = "Use Skill " .. v,
+        Default = true,
+        Callback = function(Value)
+            selectedSkills[v] = Value
         end
+    })
+end
+
+function AutoSkillsFunction()
+    spawn(function()
+        while autoSkills do
+            pcall(function()
+                for i, v in pairs(selectedSkills) do
+                    if v then
+                        game:GetService("VirtualInputManager"):SendKeyEvent(true, i, false, game)
+                        wait(0.1)
+                        game:GetService("VirtualInputManager"):SendKeyEvent(false, i, false, game)
+                    end
+                end
+            end)
+            wait(1)
+        end
+    end)
+end
+
+-- Misc Tab
+local MiscTab = Window:MakeTab({
+    Name = "Misc",
+    Icon = "rbxassetid://4483345998",
+    PremiumOnly = false
+})
+
+local MiscSection = MiscTab:AddSection({
+    Name = "Miscellaneous"
+})
+
+MiscSection:AddButton({
+    Name = "Redeem All Codes",
+    Callback = function()
+        local codes = {
+            "JULYUPDATE",
+            "THEGREATACE",
+            "SUBGOLDEN",
+            "ADMINGIVEAWAY",
+            "NEWUPDATE15",
+            "FUDD10",
+            "BIGNEWS",
+            "FLAMES",
+            "ENYU_IS_PRO",
+            "SUB2GAMERROBOT_EXP1",
+            "SUB2GAMERROBOT_RESET1",
+            "TY_FOR_WATCHING",
+            "STRAWHATMAINE"
+        }
         
-        if foundMatch and (v:IsA("Model") or v:IsA("Part")) then
-            foundCount = foundCount + 1
-            -- Look for sell parts
-            if v:IsA("Model") then
-                for _, child in pairs(v:GetDescendants()) do
-                    if child.Name:lower():find("sell") or child.Name:lower():find("counter") or 
-                       child.Name:lower():find("pad") or child.Name:lower():find("part") then
-                        updateDebug("Found sell part: " .. child.Name)
-                        return child
-                    end
-                end
-                
-                -- If no specific part found, return first part
-                local mainPart = v:FindFirstChildOfClass("Part") or v:FindFirstChildWhichIsA("BasePart")
-                if mainPart then
-                    updateDebug("Using model part: " .. mainPart.Name)
-                    return mainPart
-                end
-            else
-                updateDebug("Using part: " .. v.Name)
-                return v
-            end
+        for i, v in pairs(codes) do
+            local args = {
+                [1] = "Redeem",
+                [2] = v
+            }
+            rep.Remotes.CommF_:InvokeServer(unpack(args))
+            wait(0.5)
         end
     end
-    
-    updateDebug("Found " .. foundCount .. " potential sell locations")
-    return nil
-}
+})
 
--- Function to sell wood
-function sellWood()
-    if not checkCharacter() then return false end
-    
-    local sellPad = findSellLocation()
-    if not sellPad then
-        updateStatus("Sell location not found")
-        return false
-    end
-    
-    updateStatus("Moving to sell location")
-    teleportTo(sellPad.Position + Vector3.new(0, 5, 0))
-    task.wait(1)
-    
-    updateStatus("Attempting to sell")
-    
-    -- Attempt to sell using common remotes
-    local soldSomething = false
-    local remotes = {"ClientRequestSellWood", "Sell", "SellWood", "RequestSellWood", 
-                    "SellLumber", "PurchaseWood", "SellItems", "Market"}
-    
-    -- Try specific named remotes first
-    for _, remoteName in ipairs(remotes) do
-        updateDebug("Trying remote: " .. remoteName)
-        local remote = game:GetService("ReplicatedStorage"):FindFirstChild(remoteName, true)
-        if remote then
-            pcall(function() remote:FireServer(sellPad) end)
-            pcall(function() remote:FireServer() end)
-            soldSomething = true
-            updateDebug("Used remote: " .. remoteName)
-            break
-        end
-    end
-    
-    -- If no specific remote found, try common patterns
-    if not soldSomething then
-        updateDebug("Searching for sell remotes")
-        for _, v in pairs(game:GetService("ReplicatedStorage"):GetDescendants()) do
-            if v:IsA("RemoteEvent") and (v.Name:lower():find("sell") or 
-               v.Name:lower():find("purchase") or v.Name:lower():find("cash") or
-               v.Name:lower():find("buy") or v.Name:lower():find("market")) then
-                
-                updateDebug("Trying remote: " .. v.Name)
-                pcall(function() v:FireServer(sellPad) end)
-                pcall(function() v:FireServer() end)
-                soldSomething = true
-                updateDebug("Used remote: " .. v.Name)
-                break
+MiscSection:AddSlider({
+    Name = "Walk Speed",
+    Min = 16,
+    Max = 500,
+    Default = 16,
+    Color = Color3.fromRGB(255, 255, 255),
+    Increment = 1,
+    ValueName = "Speed",
+    Callback = function(Value)
+        plr.Character.Humanoid.WalkSpeed = Value
+    end    
+})
+
+MiscSection:AddSlider({
+    Name = "Jump Power",
+    Min = 50,
+    Max = 500,
+    Default = 50,
+    Color = Color3.fromRGB(255, 255, 255),
+    Increment = 1,
+    ValueName = "Power",
+    Callback = function(Value)
+        plr.Character.Humanoid.JumpPower = Value
+    end    
+})
+
+MiscSection:AddToggle({
+    Name = "Infinite Jump",
+    Default = false,
+    Callback = function(Value)
+        infiniteJump = Value
+        game:GetService("UserInputService").JumpRequest:Connect(function()
+            if infiniteJump then
+                plr.Character:FindFirstChildOfClass('Humanoid'):ChangeState("Jumping")
             end
-        end
-    end
-    
-    -- Third approach: Try interacting with sell pad directly
-    if not soldSomething then
-        updateDebug("Trying direct interaction")
-        pcall(function()
-            game:GetService("ReplicatedStorage").Interaction.ClientInteracted:FireServer(sellPad)
         end)
-        soldSomething = true
     end
-    
-    if soldSomething then
-        updateStatus("Wood sold")
-        stats.woodSold = stats.woodSold + 1
-        updateStats()
-        return true
-    else
-        updateStatus("Failed to sell - no method worked")
-    end
-    
-    return false
-}
+})
 
--- Main farming function
-function startFarming()
-    if farming then
-        updateDebug("Farming already in progress")
-        return
+MiscSection:AddButton({
+    Name = "Unlock All Teleports",
+    Callback = function()
+        local args = {
+            [1] = "TravelMain" -- Best method: TP to Third Sea first, then back to Main
+        }
+        rep.Remotes.CommF_:InvokeServer(unpack(args))
     end
-    
-    farming = true
-    updateStatus("Starting farm cycle")
-    
-    -- Main loop
-    spawn(function() -- Use spawn instead of coroutine.wrap for better error reporting
-        while farming do
-            if not checkCharacter() then
-                updateStatus("Character issue - waiting")
-                task.wait(2)
-                character = player.Character or player.CharacterAdded:Wait()
-                continue
-            end
-            
-            -- Step 1: Find tree
-            updateStatus("Finding tree")
-            local tree = findNearestTree()
-            
-            if tree then
-                updateStatus("Found tree: " .. tree.Name)
-                
-                -- Step 2: Cut tree
-                if cutTree(tree) then
-                    updateStatus("Tree cut successfully")
-                    task.wait(config.autoDelay)
-                    
-                    -- Step 3: Process logs
-                    updateStatus("Processing logs")
-                    local processed = processLogs()
-                    if processed then
-                        updateStatus("Logs processed")
-                    else
-                        updateStatus("No logs processed")
-                    end
-                    task.wait(config.autoDelay)
-                    
-                    -- Step 4: Sell if enabled
-                    if selling then
-                        updateStatus("Selling wood")
-                        sellWood()
-                        task.wait(config.autoDelay)
-                    end
-                else
-                    updateStatus("Failed to cut tree")
-                    task.wait(1)
-                end
-            else
-                updateStatus("No trees found")
-                task.wait(3)
-            end
-            
-            task.wait(0.5)
-            
-            -- Check if farming was disabled
-            if not farming then
-                updateStatus("Farming stopped")
-                break
+})
+
+MiscSection:AddButton({
+    Name = "Rejoin Server",
+    Callback = function()
+        TeleportService:Teleport(game.PlaceId, plr)
+    end
+})
+
+MiscSection:AddButton({
+    Name = "Server Hop",
+    Callback = function()
+        local servers = {}
+        local req = game:HttpGetAsync("https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100")
+        local data = game:GetService("HttpService"):JSONDecode(req)
+        for i, v in pairs(data.data) do
+            if v.playing ~= v.maxPlayers then
+                table.insert(servers, v.id)
             end
         end
-    end)
-end
-
--- Create buttons
-debugPrint("Creating buttons...")
-local function CreateButton(name, position, callback)
-    local Button = Instance.new("TextButton")
-    Button.Name = name
-    Button.Size = UDim2.new(0, 110, 0, 30)
-    Button.Position = position
-    Button.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-    Button.TextColor3 = Color3.fromRGB(255, 255, 255)
-    Button.Text = name
-    Button.TextSize = 14
-    Button.Font = Enum.Font.SourceSans
-    Button.Parent = MainFrame
-    
-    -- Add additional click effects
-    Button.MouseButton1Click:Connect(function()
-        Button.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
-        updateDebug("Clicked button: " .. name)
-        task.wait(0.1)
-        Button.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-        callback()
-    end)
-    
-    return Button
-end
-
-local FarmButton = CreateButton("Start Farm", UDim2.new(0, 10, 0, 150), function()
-    updateDebug("Farm button pressed")
-    farming = not farming
-    FarmButton.Text = farming and "Stop Farm" or "Start Farm"
-    
-    if farming then
-        updateStatus("Starting farm...")
-        startFarming()
-    else
-        updateStatus("Stopping farm...")
+        if #servers > 0 then
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, servers[math.random(1, #servers)], plr)
+        else
+            OrionLib:MakeNotification({
+                Name = "Error",
+                Content = "No servers found",
+                Image = "rbxassetid://4483345998",
+                Time = 5
+            })
+        end
     end
-end)
+})
 
-local SellButton = CreateButton("Auto Sell: OFF", UDim2.new(0, 130, 0, 150), function()
-    updateDebug("Sell button pressed")
-    selling = not selling
-    SellButton.Text = "Auto Sell: " .. (selling and "ON" or "OFF")
-    updateStatus("Auto Sell " .. (selling and "enabled" or "disabled"))
-end)
+local InfoSection = MiscTab:AddSection({
+    Name = "Information"
+})
 
-local SellNowButton = CreateButton("Sell Now", UDim2.new(0, 10, 0, 190), function()
-    updateDebug("Sell Now button pressed")
-    updateStatus("Manual selling...")
-    sellWood()
-end)
+InfoSection:AddParagraph("Premium Blox Fruits Hub", "Created by Script Hub Developer")
+InfoSection:AddParagraph("Last Updated", "March 25, 2025")
 
-local TestButton = CreateButton("Test Trees", UDim2.new(0, 130, 0, 190), function()
-    updateDebug("Test button pressed")
-    updateStatus("Testing tree finder...")
-    
-    local tree = findNearestTree()
-    if tree then
-        updateStatus("Found tree: " .. tree.Name)
-    else
-        updateStatus("No trees found!")
-    end
-end)
-
--- Error handling for the entire script
-pcall(function()
-    updateStatus("Script loaded!")
-    updateDebug("Ready - click any button")
-end)
+-- Initialize the library
+OrionLib:Init()
